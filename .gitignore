@@ -1,0 +1,29 @@
+# Dataset (475MB — download separately)
+tiny-imagenet-200/
+tiny-imagenet-200.zip
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# Model files are tracked via Git LFS or kept small enough.
+# If model files grow large, consider using Git LFS:
+#   git lfs track "*.h5" "*.hdf5"
