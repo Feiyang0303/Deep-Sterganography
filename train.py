@@ -153,16 +153,24 @@ def make_model(input_size):
 
     decoder = make_decoder(input_size)
     decoder.compile(optimizer="adam", loss=rev_loss)
-    decoder.trainable = False
 
     output_Cprime = encoder([input_S, input_C])
-    output_Sprime = decoder(output_Cprime)
+
+    # Build a non-trainable copy of decoder for the autoencoder so that
+    # only the encoder (prep + hiding) weights are updated by full_loss.
+    decoder_fixed = make_decoder(input_size)
+    decoder_fixed._name = "DecoderFixed"
+    for src, dst in zip(decoder.layers, decoder_fixed.layers):
+        dst.set_weights(src.get_weights())
+    decoder_fixed.trainable = False
+
+    output_Sprime = decoder_fixed(output_Cprime)
 
     autoencoder = Model(inputs=[input_S, input_C],
                         outputs=concatenate([output_Sprime, output_Cprime]))
     autoencoder.compile(optimizer="adam", loss=full_loss)
 
-    return encoder, decoder, autoencoder
+    return encoder, decoder, autoencoder, decoder_fixed
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +191,8 @@ def lr_schedule(epoch_idx):
 # Training loop
 # ---------------------------------------------------------------------------
 def train(input_S, input_C, args):
-    encoder_model, reveal_model, autoencoder_model = make_model(input_S.shape[1:])
+    encoder_model, reveal_model, autoencoder_model, decoder_fixed = \
+        make_model(input_S.shape[1:])
 
     autoencoder_model.optimizer.learning_rate.assign(args.lr)
     reveal_model.optimizer.learning_rate.assign(args.lr)
@@ -203,6 +212,10 @@ def train(input_S, input_C, args):
             batch_C = input_C[idx:min(idx + args.batch_size, m)]
 
             C_prime = encoder_model.predict([batch_S, batch_C], verbose=0)
+
+            # Sync decoder_fixed weights from the trainable decoder
+            for src, dst in zip(reveal_model.layers, decoder_fixed.layers):
+                dst.set_weights(src.get_weights())
 
             ae_loss = autoencoder_model.train_on_batch(
                 x=[batch_S, batch_C],
