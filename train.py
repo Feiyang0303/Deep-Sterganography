@@ -34,6 +34,8 @@ def parse_args():
                     help="Images per class for training")
     p.add_argument("--test_images", type=int, default=500,
                     help="Total test images")
+    p.add_argument("--beta", type=float, default=1.0,
+                    help="Weight for secret reconstruction loss (paper tests 0.75, 1.0, 1.25)")
     p.add_argument("--data_dir", type=str, default="./tiny-imagenet-200")
     p.add_argument("--output_dir", type=str, default="./output")
     return p.parse_args()
@@ -73,17 +75,21 @@ def load_dataset_small(data_dir, num_images_per_class_train=10,
 # ---------------------------------------------------------------------------
 # Loss functions
 # ---------------------------------------------------------------------------
-BETA = 1.0
+BETA = 1.0  # overridden by --beta arg in main()
 
-def rev_loss(s_true, s_pred):
-    return BETA * K.sum(K.square(s_true - s_pred))
+def make_rev_loss(beta):
+    def rev_loss(s_true, s_pred):
+        return beta * K.sum(K.square(s_true - s_pred))
+    return rev_loss
 
-def full_loss(y_true, y_pred):
-    s_true, c_true = y_true[..., 0:3], y_true[..., 3:6]
-    s_pred, c_pred = y_pred[..., 0:3], y_pred[..., 3:6]
-    s_loss = rev_loss(s_true, s_pred)
-    c_loss = K.sum(K.square(c_true - c_pred))
-    return s_loss + c_loss
+def make_full_loss(beta):
+    def full_loss(y_true, y_pred):
+        s_true, c_true = y_true[..., 0:3], y_true[..., 3:6]
+        s_pred, c_pred = y_pred[..., 0:3], y_pred[..., 3:6]
+        s_loss = beta * K.sum(K.square(s_true - s_pred))
+        c_loss = K.sum(K.square(c_true - c_pred))
+        return s_loss + c_loss
+    return full_loss
 
 
 # ---------------------------------------------------------------------------
@@ -145,14 +151,14 @@ def make_decoder(input_size):
     return Model(inputs=reveal_input, outputs=output_Sprime, name="Decoder")
 
 
-def make_model(input_size):
+def make_model(input_size, beta=1.0):
     input_S = Input(shape=input_size)
     input_C = Input(shape=input_size)
 
     encoder = make_encoder(input_size)
 
     decoder = make_decoder(input_size)
-    decoder.compile(optimizer="adam", loss=rev_loss)
+    decoder.compile(optimizer="adam", loss=make_rev_loss(beta))
 
     output_Cprime = encoder([input_S, input_C])
 
@@ -168,7 +174,7 @@ def make_model(input_size):
 
     autoencoder = Model(inputs=[input_S, input_C],
                         outputs=concatenate([output_Sprime, output_Cprime]))
-    autoencoder.compile(optimizer="adam", loss=full_loss)
+    autoencoder.compile(optimizer="adam", loss=make_full_loss(beta))
 
     return encoder, decoder, autoencoder, decoder_fixed
 
@@ -192,7 +198,7 @@ def lr_schedule(epoch_idx):
 # ---------------------------------------------------------------------------
 def train(input_S, input_C, args):
     encoder_model, reveal_model, autoencoder_model, decoder_fixed = \
-        make_model(input_S.shape[1:])
+        make_model(input_S.shape[1:], beta=args.beta)
 
     autoencoder_model.optimizer.learning_rate.assign(args.lr)
     reveal_model.optimizer.learning_rate.assign(args.lr)
@@ -275,12 +281,13 @@ def main():
     input_S = X_train[: X_train.shape[0] // 2]
     input_C = X_train[X_train.shape[0] // 2:]
 
-    print("Starting training...")
+    beta_tag = f"beta_{args.beta:.2f}"
+    print(f"Starting training with beta={args.beta}...")
     loss_history, autoencoder_model = train(input_S, input_C, args)
 
     # Save weights & model
-    weights_path = os.path.join(args.output_dir, "model_weights.weights.h5")
-    model_path = os.path.join(args.output_dir, "model.keras")
+    weights_path = os.path.join(args.output_dir, f"model_weights_{beta_tag}.weights.h5")
+    model_path = os.path.join(args.output_dir, f"model_{beta_tag}.keras")
     autoencoder_model.save_weights(weights_path)
     autoencoder_model.save(model_path)
     print(f"Model saved to {args.output_dir}")
@@ -288,10 +295,10 @@ def main():
     # Plot loss curve
     plt.figure()
     plt.plot(loss_history)
-    plt.title("Model loss")
+    plt.title(f"Model loss (β={args.beta})")
     plt.ylabel("Loss")
     plt.xlabel("Epoch")
-    plt.savefig(os.path.join(args.output_dir, "loss_curve.png"), dpi=150)
+    plt.savefig(os.path.join(args.output_dir, f"loss_curve_{beta_tag}.png"), dpi=150)
     print("Loss curve saved.")
 
     # Evaluate
