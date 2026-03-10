@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=06:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --output=output/slurm-%j.out
 #SBATCH --error=output/slurm-%j-err.out
 #SBATCH --mail-type=END,FAIL
@@ -24,8 +24,8 @@ print(':'.join(os.path.join(base, d, 'lib') for d in dirs))
 mkdir -p output
 
 # Run training
-python train.py \
-    --epochs 100 \
+python -u train.py \
+    --epochs 1000 \
     --batch_size 32 \
     --lr 0.001 \
     --train_per_class 10 \
