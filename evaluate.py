@@ -359,6 +359,69 @@ def main():
     plt.savefig(vis_path, dpi=150)
     print(f"Visual samples saved to {vis_path}")
 
+    # --- Error histograms (Paper Figure 4, right) ---
+    diff_S_flat = (255 * np.abs(decoded_S - input_S)).flatten()
+    diff_C_flat = (255 * np.abs(decoded_C - input_C)).flatten()
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+    ax1.hist(diff_C_flat, bins=100, density=True, alpha=0.75, color="#3498db")
+    ax1.set_title("Distribution of Error in Cover Image")
+    ax1.set_xlabel("Pixel error (0-255)")
+    ax1.set_ylabel("Density")
+    ax1.set_xlim(0, 80)
+
+    ax2.hist(diff_S_flat, bins=100, density=True, alpha=0.75, color="#e74c3c")
+    ax2.set_title("Distribution of Error in Secret Image")
+    ax2.set_xlabel("Pixel error (0-255)")
+    ax2.set_ylabel("Density")
+    ax2.set_xlim(0, 80)
+
+    plt.tight_layout()
+    hist_path = os.path.join(args.output_dir, "error_histograms.png")
+    plt.savefig(hist_path, dpi=150)
+    print(f"Error histograms saved to {hist_path}")
+
+    # --- Residual analysis (Paper Section 3.1, Figure 7) ---
+    # If the original cover is leaked, what can be seen in the residual?
+    n_res = 4
+    enhancements = [5, 10, 20]
+    res_indices = [random.randint(0, len(input_S) - 1) for _ in range(n_res)]
+
+    n_cols = 2 + len(enhancements)  # cover, container, residual@5x, 10x, 20x
+    fig, axes = plt.subplots(n_res, n_cols, figsize=(n_cols * 3, n_res * 3))
+
+    for row, idx in enumerate(res_indices):
+        # Original cover
+        ax = axes[row, 0]
+        ax.imshow(np.clip(input_C[idx], 0, 1))
+        ax.axis("off")
+        if row == 0:
+            ax.set_title("Original Cover", fontsize=10)
+
+        # Container (stego) image
+        ax = axes[row, 1]
+        ax.imshow(np.clip(decoded_C[idx], 0, 1))
+        ax.axis("off")
+        if row == 0:
+            ax.set_title("Container", fontsize=10)
+
+        # Residual at different enhancements
+        residual = np.abs(decoded_C[idx] - input_C[idx])
+        for j, enhance in enumerate(enhancements):
+            ax = axes[row, 2 + j]
+            ax.imshow(np.clip(residual * enhance, 0, 1))
+            ax.axis("off")
+            if row == 0:
+                ax.set_title(f"Residual ×{enhance}", fontsize=10)
+
+    plt.suptitle("Residual Analysis: What Is Visible If the Original Cover Is Leaked?",
+                 fontsize=13, y=1.02)
+    plt.tight_layout()
+    res_path = os.path.join(args.output_dir, "residual_analysis.png")
+    plt.savefig(res_path, dpi=150, bbox_inches="tight")
+    print(f"Residual analysis saved to {res_path}")
+
 
 if __name__ == "__main__":
     main()
