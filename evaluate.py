@@ -422,6 +422,84 @@ def main():
     plt.savefig(res_path, dpi=150, bbox_inches="tight")
     print(f"Residual analysis saved to {res_path}")
 
+    # --- Bit sensitivity analysis (Paper Section 4, Figure 9) ---
+    # Flip each bit position (0-7) in each color channel of the container
+    # and measure the effect on the recovered secret across all channels.
+    print("\nRunning bit sensitivity analysis...")
+    container_uint8 = (np.clip(container_images, 0, 1) * 255).astype(np.uint8)
+    channels = ["Red", "Green", "Blue"]
+    bit_positions = list(range(8))
+
+    # Baseline secret from unmodified container
+    baseline_S = reveal_from_ae.predict(container_images, verbose=0)
+
+    # impact_on_container[src_ch][bit] = [effect_R, effect_G, effect_B]
+    # impact_on_secret[src_ch][bit] = [effect_R, effect_G, effect_B]
+    impact_on_container = np.zeros((3, 8, 3))
+    impact_on_secret = np.zeros((3, 8, 3))
+
+    for ch in range(3):
+        for bit in bit_positions:
+            flipped = container_uint8.copy()
+            flipped[..., ch] = flipped[..., ch] ^ (1 << bit)
+            flipped_float = flipped.astype(np.float32) / 255.0
+
+            # Effect on container itself (control)
+            for out_ch in range(3):
+                impact_on_container[ch, bit, out_ch] = np.mean(
+                    np.abs(flipped_float[..., out_ch] - container_images[..., out_ch]) * 255
+                )
+
+            # Effect on recovered secret
+            recovered_flipped = reveal_from_ae.predict(flipped_float, verbose=0)
+            for out_ch in range(3):
+                impact_on_secret[ch, bit, out_ch] = np.mean(
+                    np.abs(recovered_flipped[..., out_ch] - baseline_S[..., out_ch]) * 255
+                )
+
+        print(f"  {channels[ch]} channel done")
+
+    # Plot: 2 rows x 3 cols (top=container control, bottom=secret impact)
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    bar_width = 0.25
+    x = np.arange(8)
+    colors_rgb = ["#e74c3c", "#2ecc71", "#3498db"]
+
+    for col, src_ch in enumerate(range(3)):
+        # Top row: effect on container (control)
+        ax = axes[0, col]
+        for out_ch in range(3):
+            ax.bar(x + out_ch * bar_width, impact_on_container[src_ch, :, out_ch],
+                   bar_width, label=f"{channels[out_ch]}", color=colors_rgb[out_ch], alpha=0.8)
+        ax.set_title(f"Flip {channels[src_ch]} bit → Container", fontsize=10)
+        ax.set_xlabel("Bit position")
+        ax.set_ylabel("Mean pixel change")
+        ax.set_xticks(x + bar_width)
+        ax.set_xticklabels([str(b) for b in bit_positions])
+        if col == 0:
+            ax.legend(fontsize=8)
+
+        # Bottom row: effect on secret
+        ax = axes[1, col]
+        for out_ch in range(3):
+            ax.bar(x + out_ch * bar_width, impact_on_secret[src_ch, :, out_ch],
+                   bar_width, label=f"{channels[out_ch]}", color=colors_rgb[out_ch], alpha=0.8)
+        ax.set_title(f"Flip {channels[src_ch]} bit → Secret", fontsize=10)
+        ax.set_xlabel("Bit position")
+        ax.set_ylabel("Mean pixel change")
+        ax.set_xticks(x + bar_width)
+        ax.set_xticklabels([str(b) for b in bit_positions])
+        if col == 0:
+            ax.legend(fontsize=8)
+
+    plt.suptitle("Bit Sensitivity: Effect of Flipping a Single Bit in Container Image\n"
+                 "(Top: effect on container itself — control. Bottom: effect on recovered secret)",
+                 fontsize=12)
+    plt.tight_layout()
+    bit_path = os.path.join(args.output_dir, "bit_sensitivity.png")
+    plt.savefig(bit_path, dpi=150, bbox_inches="tight")
+    print(f"Bit sensitivity analysis saved to {bit_path}")
+
 
 if __name__ == "__main__":
     main()
