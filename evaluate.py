@@ -257,7 +257,11 @@ def main():
     autoencoder_model.load_weights(args.weights)
 
     # Extract the reveal (decoder) from the autoencoder
-    reveal_from_ae = autoencoder_model.get_layer("DecoderFixed")
+    # DecoderFixed (new) or Decoder (older saved models)
+    try:
+        reveal_from_ae = autoencoder_model.get_layer("DecoderFixed")
+    except ValueError:
+        reveal_from_ae = autoencoder_model.get_layer("Decoder")
 
     print("Generating container (stego) images...")
     decoded = autoencoder_model.predict([input_S, input_C], verbose=0)
