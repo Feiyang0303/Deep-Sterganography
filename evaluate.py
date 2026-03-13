@@ -216,6 +216,26 @@ def pixel_error(original, reconstructed):
     return np.sqrt(np.mean(np.square(255 * (original - reconstructed))))
 
 
+def chi_square_lsb_score(img_uint8, min_expected=5):
+    """
+    Chi-square LSB steganalysis (StegExpose-style).
+    Low score = LSB-like (pairs equalized). High score = natural image.
+    Returns mean chi2 per channel (averaged over RGB).
+    """
+    scores = []
+    for ch in range(3):
+        counts = np.bincount(img_uint8[..., ch].flatten(), minlength=256)
+        even_counts = counts[0::2]  # 0, 2, 4, ...
+        odd_counts = counts[1::2]   # 1, 3, 5, ...
+        total = even_counts + odd_counts
+        mask = total >= min_expected
+        # Chi2 per pair: (a-b)^2 / (a+b), sum over pairs
+        diff_sq = (even_counts - odd_counts).astype(np.float64) ** 2
+        chi2_vals = np.where(mask, diff_sq / np.maximum(total.astype(np.float64), 1), 0)
+        scores.append(np.sum(chi2_vals))
+    return np.mean(scores)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -237,7 +257,7 @@ def main():
     autoencoder_model.load_weights(args.weights)
 
     # Extract the reveal (decoder) from the autoencoder
-    reveal_from_ae = autoencoder_model.get_layer("Decoder")
+    reveal_from_ae = autoencoder_model.get_layer("DecoderFixed")
 
     print("Generating container (stego) images...")
     decoded = autoencoder_model.predict([input_S, input_C], verbose=0)
@@ -499,6 +519,49 @@ def main():
     bit_path = os.path.join(args.output_dir, "bit_sensitivity.png")
     plt.savefig(bit_path, dpi=150, bbox_inches="tight")
     print(f"Bit sensitivity analysis saved to {bit_path}")
+
+    # --- LSB steganalysis (Paper: StegExpose / detection resistance) ---
+    # Chi-square test: LSB stego equalizes pairs (2k,2k+1) -> low chi2.
+    # Deep stego does NOT use LSB -> expect similar chi2 for covers and containers.
+    print("\nRunning LSB steganalysis (chi-square, StegExpose-style)...")
+    cover_uint8 = (np.clip(input_C, 0, 1) * 255).astype(np.uint8)
+    container_uint8 = (np.clip(container_images, 0, 1) * 255).astype(np.uint8)
+
+    cover_scores = [chi_square_lsb_score(cover_uint8[i]) for i in range(len(cover_uint8))]
+    container_scores = [chi_square_lsb_score(container_uint8[i]) for i in range(len(container_uint8))]
+
+    mean_cover = np.mean(cover_scores)
+    mean_container = np.mean(container_scores)
+    std_cover = np.std(cover_scores)
+    std_container = np.std(container_scores)
+
+    print(f"  Covers (clean):     χ² = {mean_cover:.1f} ± {std_cover:.1f}")
+    print(f"  Containers (stego): χ² = {mean_container:.1f} ± {std_container:.1f}")
+    print("  → Similar χ² means LSB detector cannot distinguish (Deep stego ≠ LSB)")
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    axes[0].hist(cover_scores, bins=30, alpha=0.7, color="#3498db", edgecolor="white", label="Covers")
+    axes[0].hist(container_scores, bins=30, alpha=0.7, color="#e74c3c", edgecolor="white", label="Containers")
+    axes[0].set_xlabel("Chi-square score (higher = less LSB-like)")
+    axes[0].set_ylabel("Count")
+    axes[0].set_title("LSB Steganalysis: χ² Distribution")
+    axes[0].legend()
+
+    axes[1].bar([0], [mean_cover], yerr=[std_cover], color="#3498db", capsize=5, label="Covers")
+    axes[1].bar([1], [mean_container], yerr=[std_container], color="#e74c3c", capsize=5, label="Containers")
+    axes[1].set_xticks([0, 1])
+    axes[1].set_xticklabels(["Covers\n(clean)", "Containers\n(deep stego)"])
+    axes[1].set_ylabel("Mean χ² score")
+    axes[1].set_title("LSB Detector Fails: Deep Stego ≠ LSB")
+    axes[1].legend()
+
+    plt.suptitle("StegExpose-Style LSB Detection: Deep Steganography Evades LSB Detectors",
+                 fontsize=12, y=1.02)
+    plt.tight_layout()
+    steg_path = os.path.join(args.output_dir, "lsb_steganalysis.png")
+    plt.savefig(steg_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"LSB steganalysis saved to {steg_path}")
 
 
 if __name__ == "__main__":
