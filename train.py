@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import random
 import sys
@@ -238,7 +239,7 @@ def train(input_S, input_C, args):
 
         mean_ae = np.mean(ae_losses)
         mean_rev = np.mean(rev_losses)
-        loss_history.append(mean_ae)
+        loss_history.append({"ae": mean_ae, "rev": mean_rev})
 
         print(f"Epoch {epoch+1:4d}/{args.epochs} | "
               f"AE Loss: {mean_ae:10.2f} | Rev Loss: {mean_rev:10.2f} | lr: {lr}")
@@ -292,14 +293,37 @@ def main():
     autoencoder_model.save(model_path)
     print(f"Model saved to {args.output_dir}")
 
-    # Plot loss curve
-    plt.figure()
-    plt.plot(loss_history)
-    plt.title(f"Model loss (β={args.beta})")
-    plt.ylabel("Loss")
-    plt.xlabel("Epoch")
-    plt.savefig(os.path.join(args.output_dir, f"loss_curve_{beta_tag}.png"), dpi=150)
-    print("Loss curve saved.")
+    # Plot loss curves (Paper: training curves)
+    ae_losses = [h["ae"] for h in loss_history]
+    rev_losses = [h["rev"] for h in loss_history]
+    epochs = range(1, len(loss_history) + 1)
+
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+    ax1.plot(epochs, ae_losses, color="#3498db", label="AE Loss (cover + secret)")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("AE Loss", color="#3498db")
+    ax1.tick_params(axis="y", labelcolor="#3498db")
+    ax1.legend(loc="upper left")
+    ax1.grid(True, alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(epochs, rev_losses, color="#e74c3c", label="Rev Loss (secret only)")
+    ax2.set_ylabel("Rev Loss", color="#e74c3c")
+    ax2.tick_params(axis="y", labelcolor="#e74c3c")
+    ax2.legend(loc="upper right")
+
+    plt.title(f"Training Curves (β={args.beta})")
+    plt.tight_layout()
+    loss_curve_path = os.path.join(args.output_dir, f"loss_curve_{beta_tag}.png")
+    plt.savefig(loss_curve_path, dpi=150)
+    plt.close()
+    print(f"Loss curve saved to {loss_curve_path}")
+
+    # Save loss history to JSON for later analysis
+    history_path = os.path.join(args.output_dir, f"loss_history_{beta_tag}.json")
+    with open(history_path, "w") as f:
+        json.dump({"ae": ae_losses, "rev": rev_losses, "beta": args.beta}, f, indent=2)
+    print(f"Loss history saved to {history_path}")
 
     # Evaluate
     decoded = autoencoder_model.predict([input_S, input_C])
